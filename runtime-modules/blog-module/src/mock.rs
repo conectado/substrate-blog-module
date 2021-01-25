@@ -1,16 +1,15 @@
 #![cfg(test)]
 
 use crate::*;
-use primitives::H256;
-use runtime_io::TestExternalities;
-use runtime_primitives::{
+use frame_support::traits::{OnFinalize, OnInitialize};
+use frame_support::{impl_outer_event, impl_outer_origin, ord_parameter_types, parameter_types};
+use sp_core::H256;
+use sp_io::TestExternalities;
+use sp_runtime::{
     testing::Header,
     traits::{BlakeTwo256, IdentityLookup},
-    Perbill,
+    DispatchResult, Perbill,
 };
-use srml_support::{impl_outer_event, impl_outer_origin, parameter_types, traits::Get};
-use std::cell::RefCell;
-use system;
 
 pub(crate) const FIRST_OWNER_ORIGIN: u64 = 1;
 pub(crate) const SECOND_OWNER_ORIGIN: u64 = 2;
@@ -30,82 +29,51 @@ parameter_types! {
 }
 
 // First, implement the system pallet's configuration trait for `Runtime`
-impl system::Trait for Runtime {
+impl frame_system::Trait for Runtime {
+    type BaseCallFilter = ();
     type Origin = Origin;
-    type Index = u64;
     type Call = ();
+    type Index = u64;
     type BlockNumber = u64;
     type Hash = H256;
     type Hashing = BlakeTwo256;
     type AccountId = u64;
     type Lookup = IdentityLookup<Self::AccountId>;
     type Header = Header;
-    // To test events, use `TestEvent`. Otherwise, use the commented line
     type Event = TestEvent;
-    // type Event = ();
     type BlockHashCount = BlockHashCount;
     type MaximumBlockWeight = MaximumBlockWeight;
+    type DbWeight = ();
+    type BlockExecutionWeight = ();
+    type ExtrinsicBaseWeight = ();
+    type MaximumExtrinsicWeight = ();
     type MaximumBlockLength = MaximumBlockLength;
     type AvailableBlockRatio = AvailableBlockRatio;
     type Version = ();
-}
-
-mod test_events {
-    pub use crate::Event;
+    type PalletInfo = ();
+    type AccountData = balances::AccountData<u64>;
+    type OnNewAccount = ();
+    type OnKilledAccount = ();
+    type SystemWeightInfo = ();
 }
 
 impl_outer_event! {
     pub enum TestEvent for Runtime {
-        test_events<T>,
+        crate DefaultInstance <T>,
+        frame_system<T>,
     }
 }
 
-thread_local! {
-    static POST_TITLE_MAX_LENGTH: RefCell<u32> = RefCell::new(0);
-    static POST_BODY_MAX_LENGTH: RefCell<u32> = RefCell::new(0);
-    static REPLY_MAX_LENGTH: RefCell<u32> = RefCell::new(0);
-
-    static POSTS_MAX_NUMBER: RefCell<u32> = RefCell::new(0);
-    static REPLIES_MAX_NUMBER: RefCell<u32> = RefCell::new(0);
-}
-
-pub struct PostTitleMaxLength;
-impl Get<u32> for PostTitleMaxLength {
-    fn get() -> u32 {
-        POST_TITLE_MAX_LENGTH.with(|v| *v.borrow())
-    }
-}
-
-pub struct PostBodyMaxLength;
-impl Get<u32> for PostBodyMaxLength {
-    fn get() -> u32 {
-        POST_BODY_MAX_LENGTH.with(|v| *v.borrow())
-    }
-}
-
-pub struct ReplyMaxLength;
-impl Get<u32> for ReplyMaxLength {
-    fn get() -> u32 {
-        REPLY_MAX_LENGTH.with(|v| *v.borrow())
-    }
-}
-
-pub struct PostsMaxNumber;
-impl Get<u32> for PostsMaxNumber {
-    fn get() -> u32 {
-        POSTS_MAX_NUMBER.with(|v| *v.borrow())
-    }
-}
-
-pub struct RepliesMaxNumber;
-impl Get<u32> for RepliesMaxNumber {
-    fn get() -> u32 {
-        REPLIES_MAX_NUMBER.with(|v| *v.borrow())
-    }
+ord_parameter_types! {
+    pub const CorrectOwner: u64 = FIRST_OWNER_ORIGIN;
 }
 
 parameter_types! {
-    pub const CorrectOwner: u64 = FIRST_OWNER_ORIGIN;
+    pub const PostTitleMaxLength: u64 = 200;
+    pub const PostBodyMaxLength: u64 = 10_000;
+    pub const ReplyMaxLength: u64 = 2_000;
+    pub const PostsMaxNumber: u64 = 20;
+    pub const RepliesMaxNumber: u64 = 100;
 }
 
 impl Trait for Runtime {
@@ -118,21 +86,21 @@ impl Trait for Runtime {
     type PostsMaxNumber = PostsMaxNumber;
     type RepliesMaxNumber = RepliesMaxNumber;
 
-    type BlogOwnerEnsureOrigin = system::EnsureSignedBy<CorrectOwner, Self::AccountId>;
+    type BlogOwnerEnsureOrigin = frame_system::EnsureSignedBy<CorrectOwner, Self::AccountId>;
 
-    type ParticipantEnsureOrigin = system::EnsureSigned<Self::ParticipantId>;
+    type ParticipantEnsureOrigin = frame_system::EnsureSigned<Self::ParticipantId>;
     type ParticipantId = u64;
 
-    type PostId = u32;
-    type ReplyId = u32;
+    type PostId = u64;
+    type ReplyId = u64;
 }
 
 pub struct ExtBuilder {
-    post_title_max_length: u32,
-    post_body_max_length: u32,
-    reply_max_length: u32,
-    posts_max_number: u32,
-    replies_max_number: u32,
+    post_title_max_length: u64,
+    post_body_max_length: u64,
+    reply_max_length: u64,
+    posts_max_number: u64,
+    replies_max_number: u64,
 }
 
 impl Default for ExtBuilder {
@@ -148,53 +116,32 @@ impl Default for ExtBuilder {
 }
 
 impl ExtBuilder {
-    pub fn post_title_max_length(mut self, post_title_max_length: u32) -> Self {
-        self.post_title_max_length = post_title_max_length;
-        self
-    }
-
-    pub fn post_body_max_length(mut self, post_body_max_length: u32) -> Self {
-        self.post_body_max_length = post_body_max_length;
-        self
-    }
-
-    /*
-    pub fn reply_max_length(mut self, reply_max_length: u32) -> Self {
-        self.reply_max_length = reply_max_length;
-        self
-    }
-
-    pub fn posts_max_number(mut self, posts_max_number: u32) -> Self {
-        self.posts_max_number = posts_max_number;
-        self
-    }
-
-    pub fn replies_max_number(mut self, replies_max_number: u32) -> Self {
-        self.replies_max_number = replies_max_number;
-        self
-    }
-    */
-
-    pub fn set_associated_consts(&self) {
-        POST_TITLE_MAX_LENGTH.with(|v| *v.borrow_mut() = self.post_title_max_length);
-        POST_BODY_MAX_LENGTH.with(|v| *v.borrow_mut() = self.post_body_max_length);
-        REPLY_MAX_LENGTH.with(|v| *v.borrow_mut() = self.reply_max_length);
-
-        POSTS_MAX_NUMBER.with(|v| *v.borrow_mut() = self.posts_max_number);
-        REPLIES_MAX_NUMBER.with(|v| *v.borrow_mut() = self.replies_max_number);
+    fn run_to_block(n: u64) {
+        while System::block_number() < n {
+            <System as OnFinalize<u64>>::on_finalize(System::block_number());
+            <crate::Module<Runtime> as OnFinalize<u64>>::on_finalize(System::block_number());
+            System::set_block_number(System::block_number() + 1);
+            <System as OnInitialize<u64>>::on_initialize(System::block_number());
+            <crate::Module<Runtime> as OnInitialize<u64>>::on_initialize(System::block_number());
+        }
     }
 
     pub fn build(self) -> TestExternalities {
-        self.set_associated_consts();
-        let t = system::GenesisConfig::default()
+        let t = frame_system::GenesisConfig::default()
             .build_storage::<Runtime>()
             .unwrap();
-        t.into()
+
+        let mut result: TestExternalities = t.into();
+
+        // Make sure we are not in block 0 where no events are emitted - see https://substrate.dev/recipes/2-appetizers/4-events.html#emitting-events
+        result.execute_with(|| Self::run_to_block(1));
+
+        result
     }
 }
 
 // Assign back to type variables so we can make dispatched calls of these modules later.
-pub type System = system::Module<Runtime>;
+pub type System = frame_system::Module<Runtime>;
 pub type TestBlogModule = Module<Runtime>;
 
 pub enum PostType {
@@ -222,11 +169,11 @@ type RawTestEvent = RawEvent<
 >;
 
 pub fn get_test_event(raw_event: RawTestEvent) -> TestEvent {
-    TestEvent::test_events(raw_event)
+    TestEvent::crate_DefaultInstance(raw_event)
 }
 
 // Posts
-pub fn post_count() -> u32 {
+pub fn post_count() -> u64 {
     TestBlogModule::post_count()
 }
 
@@ -269,19 +216,16 @@ pub fn get_post(
     post
 }
 
-pub fn create_post(origin_id: u64, post_type: PostType) -> Result<(), &'static str> {
+pub fn create_post(origin_id: u64, post_type: PostType) -> DispatchResult {
     let post = get_post(post_type, false, false);
     TestBlogModule::create_post(Origin::signed(origin_id), post.title, post.body)
 }
 
-pub fn lock_post(origin_id: u64, post_id: <Runtime as Trait>::PostId) -> Result<(), &'static str> {
+pub fn lock_post(origin_id: u64, post_id: <Runtime as Trait>::PostId) -> DispatchResult {
     TestBlogModule::lock_post(Origin::signed(origin_id), post_id)
 }
 
-pub fn unlock_post(
-    origin_id: u64,
-    post_id: <Runtime as Trait>::PostId,
-) -> Result<(), &'static str> {
+pub fn unlock_post(origin_id: u64, post_id: <Runtime as Trait>::PostId) -> DispatchResult {
     TestBlogModule::unlock_post(Origin::signed(origin_id), post_id)
 }
 
@@ -289,7 +233,7 @@ pub fn edit_post(
     origin_id: u64,
     post_id: <Runtime as Trait>::PostId,
     post_type: PostType,
-) -> Result<(), &'static str> {
+) -> DispatchResult {
     let post = get_post(post_type, true, false);
     TestBlogModule::edit_post(
         Origin::signed(origin_id),
@@ -320,7 +264,7 @@ pub fn get_reply_text(reply_type: ReplyType, editing: bool) -> Vec<u8> {
 
 pub fn get_reply(
     reply_type: ReplyType,
-    owner: <Runtime as system::Trait>::AccountId,
+    owner: <Runtime as frame_system::Trait>::AccountId,
     parent_id: ParentId<Runtime, DefaultInstance>,
     editing: bool,
 ) -> Reply<Runtime, DefaultInstance> {
@@ -333,7 +277,7 @@ pub fn create_reply(
     post_id: <Runtime as Trait>::PostId,
     reply_id: Option<<Runtime as Trait>::ReplyId>,
     reply_type: ReplyType,
-) -> Result<(), &'static str> {
+) -> DispatchResult {
     let reply = get_reply_text(reply_type, false);
     TestBlogModule::create_reply(Origin::signed(origin_id), post_id, reply_id, reply)
 }
@@ -343,7 +287,7 @@ pub fn edit_reply(
     post_id: <Runtime as Trait>::PostId,
     reply_id: <Runtime as Trait>::ReplyId,
     reply_type: ReplyType,
-) -> Result<(), &'static str> {
+) -> DispatchResult {
     let reply = get_reply_text(reply_type, true);
     TestBlogModule::edit_reply(Origin::signed(origin_id), post_id, reply_id, reply)
 }
@@ -355,7 +299,7 @@ pub fn react(
     index: ReactionsNumber,
     post_id: <Runtime as Trait>::PostId,
     reply_id: Option<<Runtime as Trait>::ReplyId>,
-) -> Result<(), &'static str> {
+) -> DispatchResult {
     TestBlogModule::react(Origin::signed(origin_id), index, post_id, reply_id)
 }
 
@@ -364,7 +308,7 @@ pub fn get_reactions(
     reply_id: Option<<Runtime as Trait>::ReplyId>,
     owner: <Runtime as Trait>::ParticipantId,
 ) -> Option<[bool; REACTIONS_MAX_NUMBER as usize]> {
-    if Reactions::<Runtime>::exists((post_id, reply_id), owner) {
+    if Reactions::<Runtime>::contains_key((post_id, reply_id), owner) {
         Some(TestBlogModule::reactions((post_id, reply_id), owner))
     } else {
         None

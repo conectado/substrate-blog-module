@@ -58,35 +58,32 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 use codec::{Codec, Decode, Encode};
-use rstd::fmt::Debug;
-use rstd::prelude::*;
-use runtime_primitives::traits::MaybeDisplay;
-use runtime_primitives::traits::{
-    EnsureOrigin, MaybeSerialize, MaybeSerializeDeserialize, Member, One, SimpleArithmetic,
+use errors::Error;
+pub use frame_support::dispatch::{DispatchError, DispatchResult};
+use frame_support::traits::EnsureOrigin;
+use frame_support::{
+    decl_event, decl_module, decl_storage, ensure, traits::Get, Parameter, StorageDoubleMap,
 };
-use srml_support::{
-    decl_event, decl_module, decl_storage, dispatch, ensure, traits::Get, Parameter,
-    StorageDoubleMap,
-};
+use sp_arithmetic::traits::{BaseArithmetic, One};
+use sp_runtime::traits::{MaybeSerialize, MaybeSerializeDeserialize, Member};
+use sp_std::prelude::*;
 
-mod error_messages;
+mod errors;
 mod mock;
 mod tests;
 
-use error_messages::*;
+type MaxLength = u64;
 
-type MaxLength = u32;
-
-type MaxNumber = u32;
+type MaxNumber = u64;
 
 /// Type, representing reactions number
-type ReactionsNumber = u32;
+type ReactionsNumber = u64;
 
 /// Number of reactions, presented in runtime
 pub const REACTIONS_MAX_NUMBER: ReactionsNumber = 5;
 
 // The pallet's configuration trait.
-pub trait Trait<I: Instance = DefaultInstance>: system::Trait {
+pub trait Trait<I: Instance = DefaultInstance>: frame_system::Trait {
     /// Origin from which blog owner must come.
     type BlogOwnerEnsureOrigin: EnsureOrigin<Self::Origin, Success = Self::AccountId>;
 
@@ -94,7 +91,7 @@ pub trait Trait<I: Instance = DefaultInstance>: system::Trait {
     type ParticipantEnsureOrigin: EnsureOrigin<Self::Origin, Success = Self::ParticipantId>;
 
     /// The overarching event type.
-    type Event: From<Event<Self, I>> + Into<<Self as system::Trait>::Event>;
+    type Event: From<Event<Self, I>> + Into<<Self as frame_system::Trait>::Event>;
 
     /// Security/configuration constraints
 
@@ -120,29 +117,31 @@ pub trait Trait<I: Instance = DefaultInstance>: system::Trait {
         + Copy
         + Member
         + MaybeSerializeDeserialize
-        + Debug
-        + MaybeDisplay
         + Ord;
 
     /// Type of identifier for blog posts.
     type PostId: Parameter
         + Member
-        + SimpleArithmetic
+        + BaseArithmetic
         + Codec
         + Default
         + Copy
         + MaybeSerialize
-        + PartialEq;
+        + PartialEq
+        + From<u64>
+        + Into<u64>;
 
     /// Type of identifier for replies.
     type ReplyId: Parameter
         + Member
-        + SimpleArithmetic
+        + BaseArithmetic
         + Codec
         + Default
         + Copy
         + MaybeSerialize
-        + PartialEq;
+        + PartialEq
+        + From<u64>
+        + Into<u64>;
 }
 
 /// Type, representing blog related post structure
@@ -287,13 +286,13 @@ decl_storage! {
         PostCount get(fn post_count): T::PostId;
 
         /// Post by unique blog and post identificators
-        PostById get(fn post_by_id): map hasher(blake2_128) T::PostId => Post<T, I>;
+        PostById get(fn post_by_id): map hasher(blake2_128_concat) T::PostId => Post<T, I>;
 
         /// Reply by unique blog, post and reply identificators
-        ReplyById get (fn reply_by_id): double_map hasher(blake2_128) T::PostId, blake2_128(T::ReplyId) => Reply<T, I>;
+        ReplyById get (fn reply_by_id): double_map hasher(blake2_128_concat) T::PostId, hasher(blake2_128_concat) T::ReplyId => Reply<T, I>;
 
         /// Mapping, representing AccountId -> All presented reactions state mapping by unique post or reply identificators.
-        pub Reactions get(fn reactions): double_map hasher(blake2_128) (T::PostId, Option<T::ReplyId>), blake2_128(T::ParticipantId) => [bool; REACTIONS_MAX_NUMBER as usize];
+        pub Reactions get(fn reactions): double_map hasher(blake2_128_concat) (T::PostId, Option<T::ReplyId>), hasher(blake2_128_concat) T::ParticipantId => [bool; REACTIONS_MAX_NUMBER as usize];
     }
 }
 
@@ -304,8 +303,12 @@ decl_module! {
         // Initializing events
         fn deposit_event() = default;
 
-        /// Blog owner can create posts, related to a given blog, if related blog is unlocked
-        pub fn create_post(origin, title: Vec<u8>, body: Vec<u8>) -> dispatch::Result  {
+        // Predefined Errors
+        type Error = Error<T, I>;
+
+        // Blog owner can create posts, related to a given blog, if related blog is unlocked
+        #[weight = 10_000_000] // TODO: adjust weight
+        pub fn create_post(origin, title: Vec<u8>, body: Vec<u8>) -> DispatchResult  {
 
             // Ensure blog -> owner relation exists
             Self::ensure_blog_ownership(origin)?;
@@ -338,7 +341,8 @@ decl_module! {
 
         /// Blog owner can lock posts, related to a given blog,
         /// making post immutable to any actions (replies creation, post editing, reactions, etc.)
-        pub fn lock_post(origin, post_id: T::PostId) -> dispatch::Result {
+        #[weight = 10_000_000] // TODO: adjust weight
+        pub fn lock_post(origin, post_id: T::PostId) -> DispatchResult {
 
             // Ensure blog -> owner relation exists
             Self::ensure_blog_ownership(origin)?;
@@ -360,7 +364,8 @@ decl_module! {
 
         /// Blog owner can unlock posts, related to a given blog,
         /// making post accesible to previously forbidden actions
-        pub fn unlock_post(origin, post_id: T::PostId) -> dispatch::Result {
+        #[weight = 10_000_000] // TODO: adjust weight
+        pub fn unlock_post(origin, post_id: T::PostId) -> DispatchResult {
 
             // Ensure blog -> owner relation exists
             Self::ensure_blog_ownership(origin)?;
@@ -382,12 +387,13 @@ decl_module! {
 
         /// Blog owner can edit post, related to a given blog (if unlocked)
         /// with a new title and/or body
+        #[weight = 10_000_000] // TODO: adjust weight
         pub fn edit_post(
             origin,
             post_id: T::PostId,
             new_title: Option<Vec<u8>>,
             new_body: Option<Vec<u8>>
-        ) -> dispatch::Result {
+        ) -> DispatchResult {
             // Ensure blog -> owner relation exists
             Self::ensure_blog_ownership(origin)?;
 
@@ -423,12 +429,13 @@ decl_module! {
 
         /// Create either root post reply or direct reply to reply
         /// (Only accessible, if related blog and post are unlocked)
+        #[weight = 10_000_000] // TODO: adjust weight
         pub fn create_reply(
             origin,
             post_id: T::PostId,
             reply_id: Option<T::ReplyId>,
             text: Vec<u8>
-        ) -> dispatch::Result {
+        ) -> DispatchResult {
             let reply_owner = Self::get_participant(origin)?;
 
             // Ensure post with given id exists
@@ -475,12 +482,13 @@ decl_module! {
 
         /// Reply owner can edit reply with a new text
         /// (Only accessible, if related blog and post are unlocked)
+        #[weight = 10_000_000] // TODO: adjust weight
         pub fn edit_reply(
             origin,
             post_id: T::PostId,
             reply_id: T::ReplyId,
             new_text: Vec<u8>
-        ) -> dispatch::Result {
+        ) -> DispatchResult {
             let reply_owner = Self::get_participant(origin)?;
 
             // Ensure post with given id exists
@@ -512,6 +520,7 @@ decl_module! {
 
         /// Submit either post reaction or reply reaction
         /// In case, when you resubmit reaction, it`s status will be changed to an opposite one
+        #[weight = 10_000_000] // TODO: adjust weight
         pub fn react(
             origin,
             // reaction index in array
@@ -568,26 +577,29 @@ impl<T: Trait<I>, I: Instance> Module<T, I> {
         reactions[index as usize]
     }
 
-    fn ensure_post_exists(post_id: T::PostId) -> Result<Post<T, I>, &'static str> {
-        ensure!(<PostById<T, I>>::exists(post_id), POST_NOT_FOUND);
+    fn ensure_post_exists(post_id: T::PostId) -> Result<Post<T, I>, DispatchError> {
+        ensure!(
+            <PostById<T, I>>::contains_key(post_id),
+            Error::<T, I>::PostNotFound
+        );
         Ok(Self::post_by_id(post_id))
     }
 
     fn ensure_reply_exists(
         post_id: T::PostId,
         reply_id: T::ReplyId,
-    ) -> Result<Reply<T, I>, &'static str> {
+    ) -> Result<Reply<T, I>, DispatchError> {
         ensure!(
-            <ReplyById<T, I>>::exists(post_id, reply_id),
-            REPLY_NOT_FOUND
+            <ReplyById<T, I>>::contains_key(post_id, reply_id),
+            Error::<T, I>::ReplyNotFound
         );
         Ok(Self::reply_by_id(post_id, reply_id))
     }
 
-    fn ensure_blog_ownership(blog_owner: T::Origin) -> Result<(), &'static str> {
+    fn ensure_blog_ownership(blog_owner: T::Origin) -> Result<(), DispatchError> {
         ensure!(
             T::BlogOwnerEnsureOrigin::ensure_origin(blog_owner).is_ok(),
-            BLOG_OWNERSHIP_ERROR
+            Error::<T, I>::BlogOwnershipError
         );
 
         Ok(())
@@ -596,66 +608,72 @@ impl<T: Trait<I>, I: Instance> Module<T, I> {
     fn ensure_reply_ownership(
         reply: &Reply<T, I>,
         reply_owner: &T::ParticipantId,
-    ) -> Result<(), &'static str> {
-        ensure!(reply.is_owner(reply_owner), REPLY_OWNERSHIP_ERROR);
+    ) -> Result<(), DispatchError> {
+        ensure!(
+            reply.is_owner(reply_owner),
+            Error::<T, I>::ReplyOwnershipError
+        );
         Ok(())
     }
 
-    fn ensure_post_unlocked(post: &Post<T, I>) -> Result<(), &'static str> {
-        ensure!(!post.is_locked(), POST_LOCKED_ERROR);
+    fn ensure_post_unlocked(post: &Post<T, I>) -> Result<(), DispatchError> {
+        ensure!(!post.is_locked(), Error::<T, I>::PostLockedError);
         Ok(())
     }
 
-    fn ensure_post_title_is_valid(title: &[u8]) -> Result<(), &'static str> {
+    fn ensure_post_title_is_valid(title: &[u8]) -> Result<(), DispatchError> {
         ensure!(
             title.len() <= T::PostTitleMaxLength::get() as usize,
-            POST_TITLE_TOO_LONG
+            Error::<T, I>::PostTitleTooLong
         );
         Ok(())
     }
 
-    fn ensure_post_body_is_valid(body: &[u8]) -> Result<(), &'static str> {
+    fn ensure_post_body_is_valid(body: &[u8]) -> Result<(), DispatchError> {
         ensure!(
             body.len() <= T::PostBodyMaxLength::get() as usize,
-            POST_BODY_TOO_LONG
+            Error::<T, I>::PostBodyTooLong
         );
         Ok(())
     }
 
-    fn ensure_posts_limit_not_reached() -> Result<T::PostId, &'static str> {
+    fn ensure_posts_limit_not_reached() -> Result<T::PostId, DispatchError> {
         // Get posts count, associated with given blog
         let posts_count = Self::post_count();
 
         ensure!(
             posts_count < T::PostsMaxNumber::get().into(),
-            POSTS_LIMIT_REACHED
+            Error::<T, I>::PostLimitReached
         );
 
         Ok(posts_count)
     }
 
-    fn ensure_replies_limit_not_reached(post: &Post<T, I>) -> Result<(), &'static str> {
+    fn ensure_replies_limit_not_reached(post: &Post<T, I>) -> Result<(), DispatchError> {
         // Get replies count, associated with given post
         let root_replies_count = post.replies_count();
 
         ensure!(
             root_replies_count < T::RepliesMaxNumber::get().into(),
-            REPLIES_LIMIT_REACHED
+            Error::<T, I>::RepliesLimitReached
         );
 
         Ok(())
     }
 
-    fn ensure_reply_text_is_valid(reply_text: &[u8]) -> Result<(), &'static str> {
+    fn ensure_reply_text_is_valid(reply_text: &[u8]) -> Result<(), DispatchError> {
         ensure!(
             reply_text.len() <= T::ReplyMaxLength::get() as usize,
-            REPLY_TEXT_TOO_LONG
+            Error::<T, I>::ReplyTextTooLong
         );
         Ok(())
     }
 
-    fn ensure_reaction_index_is_valid(index: ReactionsNumber) -> Result<(), &'static str> {
-        ensure!(index < REACTIONS_MAX_NUMBER, INVALID_REACTION_INDEX);
+    fn ensure_reaction_index_is_valid(index: ReactionsNumber) -> Result<(), DispatchError> {
+        ensure!(
+            index < REACTIONS_MAX_NUMBER,
+            Error::<T, I>::InvalidReactionIndex
+        );
         Ok(())
     }
 }

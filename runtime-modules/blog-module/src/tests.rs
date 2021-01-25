@@ -2,12 +2,12 @@
 
 use crate::mock::*;
 use crate::*;
-use srml_support::assert_ok;
-use system::ensure_signed;
+use frame_support::assert_ok;
+use frame_system::ensure_signed;
 
 //Blog, post or reply id
-const FIRST_ID: u32 = 0;
-const SECOND_ID: u32 = 1;
+const FIRST_ID: u64 = 0;
+const SECOND_ID: u64 = 1;
 
 fn assert_event_success(tested_event: TestEvent, number_of_events_after_call: usize) {
     // Ensure  runtime events length is equal to expected number of events after call
@@ -23,12 +23,15 @@ fn assert_event_success(tested_event: TestEvent, number_of_events_after_call: us
 }
 
 fn assert_failure(
-    call_result: Result<(), &str>,
-    expected_error: &str,
+    call_result: DispatchResult,
+    expected_error: errors::Error<Runtime, DefaultInstance>,
     number_of_events_before_call: usize,
 ) {
     // Ensure  call result is equal to expected error
-    assert_eq!(call_result, Err(expected_error));
+    assert_eq!(
+        call_result,
+        sp_std::result::Result::Err(expected_error.into())
+    );
 
     // Ensure  no other events emitted after call
     assert_eq!(System::events().len(), number_of_events_before_call);
@@ -36,7 +39,7 @@ fn assert_failure(
 
 fn ensure_replies_equality(
     reply: Option<Reply<Runtime, DefaultInstance>>,
-    reply_owner_id: <Runtime as system::Trait>::AccountId,
+    reply_owner_id: <Runtime as frame_system::Trait>::AccountId,
     parent: ParentId<Runtime, DefaultInstance>,
     editing: bool,
 ) {
@@ -92,7 +95,7 @@ fn post_creation_success() {
         assert_eq!(post_count(), 1);
 
         // Event checked
-        let post_created_event = TestEvent::test_events(RawEvent::PostCreated(FIRST_ID));
+        let post_created_event = get_test_event(RawEvent::PostCreated(FIRST_ID));
         assert_event_success(post_created_event, number_of_events_before_call + 1)
     })
 }
@@ -111,7 +114,7 @@ fn post_creation_blog_ownership_error() {
         // Failure checked
         assert_failure(
             create_result,
-            BLOG_OWNERSHIP_ERROR,
+            Error::BlogOwnershipError,
             number_of_events_before_call,
         );
     })
@@ -131,7 +134,7 @@ fn post_creation_title_too_long() {
         // Failure checked
         assert_failure(
             create_result,
-            POST_TITLE_TOO_LONG,
+            Error::PostTitleTooLong,
             number_of_events_before_call,
         );
     })
@@ -151,7 +154,7 @@ fn post_creation_body_too_long() {
         // Failure checked
         assert_failure(
             create_result,
-            POST_BODY_TOO_LONG,
+            Error::PostBodyTooLong,
             number_of_events_before_call,
         );
     })
@@ -171,7 +174,7 @@ fn post_creation_limit_reached() {
                 // Last post creation, before limit reached, failure checked
                 assert_failure(
                     Err(create_post_err),
-                    POSTS_LIMIT_REACHED,
+                    Error::PostLimitReached,
                     number_of_events_before_call,
                 );
                 break;
@@ -217,7 +220,11 @@ fn post_locking_post_not_found() {
         let lock_result = lock_post(FIRST_OWNER_ORIGIN, FIRST_ID);
 
         // Failure checked
-        assert_failure(lock_result, POST_NOT_FOUND, number_of_events_before_call);
+        assert_failure(
+            lock_result,
+            Error::PostNotFound,
+            number_of_events_before_call,
+        );
     })
 }
 
@@ -241,7 +248,7 @@ fn post_locking_ownership_error() {
         // Failure checked
         assert_failure(
             lock_result,
-            BLOG_OWNERSHIP_ERROR,
+            Error::BlogOwnershipError,
             number_of_events_before_call,
         );
     })
@@ -299,7 +306,7 @@ fn post_unlocking_owner_not_found() {
         // Failure checked
         assert_failure(
             unlock_result,
-            BLOG_OWNERSHIP_ERROR,
+            Error::BlogOwnershipError,
             number_of_events_before_call,
         );
     })
@@ -315,7 +322,11 @@ fn post_unlocking_post_not_found() {
         let unlock_result = unlock_post(FIRST_OWNER_ORIGIN, FIRST_ID);
 
         // Failure checked
-        assert_failure(unlock_result, POST_NOT_FOUND, number_of_events_before_call);
+        assert_failure(
+            unlock_result,
+            Error::PostNotFound,
+            number_of_events_before_call,
+        );
     })
 }
 
@@ -341,7 +352,7 @@ fn post_unlocking_ownership_error() {
         // Failure checked
         assert_failure(
             unlock_result,
-            BLOG_OWNERSHIP_ERROR,
+            Error::BlogOwnershipError,
             number_of_events_before_call,
         );
     })
@@ -349,29 +360,25 @@ fn post_unlocking_ownership_error() {
 
 #[test]
 fn post_editing_success() {
-    ExtBuilder::default()
-        .post_title_max_length(5)
-        .post_body_max_length(10)
-        .build()
-        .execute_with(|| {
-            // Create blog for future posts
-            create_post(FIRST_OWNER_ORIGIN, PostType::Valid).unwrap();
+    ExtBuilder::default().build().execute_with(|| {
+        // Create blog for future posts
+        create_post(FIRST_OWNER_ORIGIN, PostType::Valid).unwrap();
 
-            // Events number before tested call
-            let number_of_events_before_call = System::events().len();
+        // Events number before tested call
+        let number_of_events_before_call = System::events().len();
 
-            assert_ok!(edit_post(FIRST_OWNER_ORIGIN, FIRST_ID, PostType::Valid));
+        assert_ok!(edit_post(FIRST_OWNER_ORIGIN, FIRST_ID, PostType::Valid));
 
-            // Post after editing checked
-            let post_after_editing = post_by_id(FIRST_ID);
+        // Post after editing checked
+        let post_after_editing = post_by_id(FIRST_ID);
 
-            ensure_posts_equality(post_after_editing, true, false);
+        ensure_posts_equality(post_after_editing, true, false);
 
-            let post_edited_event = TestEvent::test_events(RawEvent::PostEdited(FIRST_ID));
+        let post_edited_event = TestEvent::crate_DefaultInstance(RawEvent::PostEdited(FIRST_ID));
 
-            // Event checked
-            assert_event_success(post_edited_event, number_of_events_before_call + 1)
-        })
+        // Event checked
+        assert_event_success(post_edited_event, number_of_events_before_call + 1)
+    })
 }
 
 #[test]
@@ -393,7 +400,7 @@ fn post_editing_ownership_error() {
         // Failure checked
         assert_failure(
             edit_result,
-            BLOG_OWNERSHIP_ERROR,
+            Error::BlogOwnershipError,
             number_of_events_before_call,
         );
     })
@@ -409,7 +416,11 @@ fn post_editing_post_not_found() {
         let edit_result = edit_post(FIRST_OWNER_ORIGIN, FIRST_ID, PostType::Valid);
 
         // Failure checked
-        assert_failure(edit_result, POST_NOT_FOUND, number_of_events_before_call);
+        assert_failure(
+            edit_result,
+            Error::PostNotFound,
+            number_of_events_before_call,
+        );
     })
 }
 
@@ -433,7 +444,11 @@ fn post_editing_post_locked_error() {
         ensure_posts_equality(post, false, true);
 
         // Failure checked
-        assert_failure(edit_result, POST_LOCKED_ERROR, number_of_events_before_call);
+        assert_failure(
+            edit_result,
+            Error::PostLockedError,
+            number_of_events_before_call,
+        );
     })
 }
 
@@ -456,7 +471,7 @@ fn post_editing_title_invalid_error() {
         // Failure checked
         assert_failure(
             edit_result,
-            POST_TITLE_TOO_LONG,
+            Error::PostTitleTooLong,
             number_of_events_before_call,
         );
     })
@@ -481,7 +496,7 @@ fn post_editing_body_invalid_error() {
         // Failure checked
         assert_failure(
             edit_result,
-            POST_BODY_TOO_LONG,
+            Error::PostBodyTooLong,
             number_of_events_before_call,
         );
     })
@@ -594,7 +609,7 @@ fn reply_creation_post_locked_error() {
         // Failure checked
         assert_failure(
             reply_creation_result,
-            POST_LOCKED_ERROR,
+            Error::PostLockedError,
             number_of_events_before_call,
         );
     })
@@ -617,7 +632,7 @@ fn reply_creation_text_too_long_error() {
         // Failure checked
         assert_failure(
             reply_creation_result,
-            REPLY_TEXT_TOO_LONG,
+            Error::ReplyTextTooLong,
             number_of_events_before_call,
         );
     })
@@ -638,7 +653,7 @@ fn reply_creation_post_not_found() {
         // Failure checked
         assert_failure(
             reply_creation_result,
-            POST_NOT_FOUND,
+            Error::PostNotFound,
             number_of_events_before_call,
         );
     })
@@ -663,7 +678,7 @@ fn reply_creation_limit_reached() {
                 // Last reply creation, before limit reached, failure checked
                 assert_failure(
                     Err(create_reply_err),
-                    REPLIES_LIMIT_REACHED,
+                    Error::RepliesLimitReached,
                     number_of_events_before_call,
                 );
                 break;
@@ -695,7 +710,7 @@ fn direct_reply_creation_reply_not_found() {
         // Failure checked
         assert_failure(
             reply_creation_result,
-            REPLY_NOT_FOUND,
+            Error::ReplyNotFound,
             number_of_events_before_call,
         );
     })
@@ -755,7 +770,7 @@ fn reply_editing_post_locked_error() {
         // Failure checked
         assert_failure(
             reply_editing_result,
-            POST_LOCKED_ERROR,
+            Error::PostLockedError,
             number_of_events_before_call,
         );
     })
@@ -776,7 +791,7 @@ fn reply_editing_not_found() {
         // Failure checked
         assert_failure(
             reply_editing_result,
-            REPLY_NOT_FOUND,
+            Error::ReplyNotFound,
             number_of_events_before_call,
         );
     })
@@ -807,7 +822,7 @@ fn reply_editing_text_too_long_error() {
         // Failure checked
         assert_failure(
             reply_editing_result,
-            REPLY_TEXT_TOO_LONG,
+            Error::ReplyTextTooLong,
             number_of_events_before_call,
         );
     })
@@ -838,7 +853,7 @@ fn reply_editing_ownership_error() {
         // Failure checked
         assert_failure(
             reply_editing_result,
-            REPLY_OWNERSHIP_ERROR,
+            Error::ReplyOwnershipError,
             number_of_events_before_call,
         );
     })
@@ -938,7 +953,7 @@ fn reaction_invalid_index() {
         // Failure checked
         assert_failure(
             react_result,
-            INVALID_REACTION_INDEX,
+            Error::InvalidReactionIndex,
             number_of_events_before_call,
         );
     })
@@ -961,7 +976,11 @@ fn reaction_post_not_found() {
         assert!(get_reactions(FIRST_ID, None, reaction_owner_id).is_none());
 
         // Failure checked
-        assert_failure(react_result, POST_NOT_FOUND, number_of_events_before_call);
+        assert_failure(
+            react_result,
+            Error::PostNotFound,
+            number_of_events_before_call,
+        );
     })
 }
 
@@ -989,7 +1008,11 @@ fn reaction_reply_not_found() {
         assert!(get_reactions(FIRST_ID, Some(FIRST_ID), reaction_owner_id).is_none());
 
         // Failure checked
-        assert_failure(react_result, REPLY_NOT_FOUND, number_of_events_before_call);
+        assert_failure(
+            react_result,
+            Error::ReplyNotFound,
+            number_of_events_before_call,
+        );
     })
 }
 
@@ -1017,7 +1040,7 @@ fn reaction_post_locked_error() {
         // Failure checked
         assert_failure(
             react_result,
-            POST_LOCKED_ERROR,
+            Error::PostLockedError,
             number_of_events_before_call,
         );
     })
