@@ -12,6 +12,9 @@ use srml_support::{impl_outer_event, impl_outer_origin, parameter_types, traits:
 use std::cell::RefCell;
 use system;
 
+pub(crate) const FIRST_OWNER_ORIGIN: u64 = 1;
+pub(crate) const SECOND_OWNER_ORIGIN: u64 = 2;
+
 impl_outer_origin! {
     pub enum Origin for Runtime {}
 }
@@ -101,6 +104,10 @@ impl Get<u32> for RepliesMaxNumber {
     }
 }
 
+parameter_types! {
+    pub const CorrectOwner: u64 = FIRST_OWNER_ORIGIN;
+}
+
 impl Trait for Runtime {
     type Event = TestEvent;
 
@@ -111,23 +118,13 @@ impl Trait for Runtime {
     type PostsMaxNumber = PostsMaxNumber;
     type RepliesMaxNumber = RepliesMaxNumber;
 
-    type BlogOwnerEnsureOrigin = system::EnsureSigned<Self::BlogOwnerId>;
-    type BlogOwnerId = u64;
+    type BlogOwnerEnsureOrigin = system::EnsureSignedBy<CorrectOwner, Self::AccountId>;
 
     type ParticipantEnsureOrigin = system::EnsureSigned<Self::ParticipantId>;
     type ParticipantId = u64;
 
-    type BlogId = u32;
     type PostId = u32;
     type ReplyId = u32;
-
-    fn ensure_blog_ownership(origin: Self::Origin, blog_id: Self::BlogId) -> dispatch::Result {
-        let block_owner_id = Self::BlogOwnerEnsureOrigin::ensure_origin(origin)?;
-
-        // Looks, like i need to integrate into monorepo at this stage to be able to test this functionality properly.
-
-        Ok(())
-    }
 }
 
 pub struct ExtBuilder {
@@ -161,6 +158,7 @@ impl ExtBuilder {
         self
     }
 
+    /*
     pub fn reply_max_length(mut self, reply_max_length: u32) -> Self {
         self.reply_max_length = reply_max_length;
         self
@@ -175,6 +173,7 @@ impl ExtBuilder {
         self.replies_max_number = replies_max_number;
         self
     }
+    */
 
     pub fn set_associated_consts(&self) {
         POST_TITLE_MAX_LENGTH.with(|v| *v.borrow_mut() = self.post_title_max_length);
@@ -215,58 +214,34 @@ pub fn generate_text(len: usize) -> Vec<u8> {
 
 type RawTestEvent = RawEvent<
     <Runtime as Trait>::ParticipantId,
-    <Runtime as Trait>::BlogOwnerId,
-    <Runtime as Trait>::BlogId,
     <Runtime as Trait>::PostId,
     <Runtime as Trait>::ReplyId,
     ReactionsNumber,
     bool,
+    DefaultInstance,
 >;
 
 pub fn get_test_event(raw_event: RawTestEvent) -> TestEvent {
     TestEvent::test_events(raw_event)
 }
 
-// Blogs
-pub fn blogs_count() -> <Runtime as Trait>::BlogId {
-    TestBlogModule::blogs_count()
-}
-
-pub fn blog_by_id(blog_id: <Runtime as Trait>::BlogId) -> Option<Blog<Runtime>> {
-    if BlogById::<Runtime>::exists(blog_id) {
-        Some(TestBlogModule::blog_by_id(blog_id))
-    } else {
-        None
-    }
-}
-
-pub fn create_blog(origin_id: u64) -> Result<(), &'static str> {
-    TestBlogModule::create_blog(origin_id)
-}
-
-pub fn lock_blog(origin_id: u64, blog_id: <Runtime as Trait>::BlogId) -> Result<(), &'static str> {
-    TestBlogModule::lock_blog(origin_id, blog_id)
-}
-
-pub fn unlock_blog(
-    origin_id: u64,
-    blog_id: <Runtime as Trait>::BlogId,
-) -> Result<(), &'static str> {
-    TestBlogModule::unlock_blog(origin_id, blog_id)
-}
-
 // Posts
-pub fn post_by_id(
-    post_id: <Runtime as Trait>::PostId,
-    blog_id: <Runtime as Trait>::BlogId,
-) -> Option<Post<Runtime>> {
-    match TestBlogModule::post_by_id(blog_id, post_id) {
-        post if post != Post::<Runtime>::default() => Some(post),
+pub fn post_count() -> u32 {
+    TestBlogModule::post_count()
+}
+
+pub fn post_by_id(post_id: <Runtime as Trait>::PostId) -> Option<Post<Runtime, DefaultInstance>> {
+    match TestBlogModule::post_by_id(post_id) {
+        post if post != Post::<Runtime, DefaultInstance>::default() => Some(post),
         _ => None,
     }
 }
 
-pub fn get_post(post_type: PostType, editing: bool, locked: bool) -> Post<Runtime> {
+pub fn get_post(
+    post_type: PostType,
+    editing: bool,
+    locked: bool,
+) -> Post<Runtime, DefaultInstance> {
     let (title, body);
     match post_type {
         // Make them different
@@ -294,41 +269,30 @@ pub fn get_post(post_type: PostType, editing: bool, locked: bool) -> Post<Runtim
     post
 }
 
-pub fn create_post(
-    origin_id: u64,
-    blog_id: <Runtime as Trait>::BlogId,
-    post_type: PostType,
-) -> Result<(), &'static str> {
+pub fn create_post(origin_id: u64, post_type: PostType) -> Result<(), &'static str> {
     let post = get_post(post_type, false, false);
-    TestBlogModule::create_post(Origin::signed(origin_id), blog_id, post.title, post.body)
+    TestBlogModule::create_post(Origin::signed(origin_id), post.title, post.body)
 }
 
-pub fn lock_post(
-    origin_id: u64,
-    blog_id: <Runtime as Trait>::BlogId,
-    post_id: <Runtime as Trait>::PostId,
-) -> Result<(), &'static str> {
-    TestBlogModule::lock_post(Origin::signed(origin_id), blog_id, post_id)
+pub fn lock_post(origin_id: u64, post_id: <Runtime as Trait>::PostId) -> Result<(), &'static str> {
+    TestBlogModule::lock_post(Origin::signed(origin_id), post_id)
 }
 
 pub fn unlock_post(
     origin_id: u64,
-    blog_id: <Runtime as Trait>::BlogId,
     post_id: <Runtime as Trait>::PostId,
 ) -> Result<(), &'static str> {
-    TestBlogModule::unlock_post(Origin::signed(origin_id), blog_id, post_id)
+    TestBlogModule::unlock_post(Origin::signed(origin_id), post_id)
 }
 
 pub fn edit_post(
     origin_id: u64,
-    blog_id: <Runtime as Trait>::BlogId,
     post_id: <Runtime as Trait>::PostId,
     post_type: PostType,
 ) -> Result<(), &'static str> {
     let post = get_post(post_type, true, false);
     TestBlogModule::edit_post(
         Origin::signed(origin_id),
-        blog_id,
         post_id,
         Some(post.title),
         Some(post.body),
@@ -337,12 +301,11 @@ pub fn edit_post(
 
 // Replies
 pub fn reply_by_id(
-    blog_id: <Runtime as Trait>::BlogId,
     post_id: <Runtime as Trait>::PostId,
     reply_id: <Runtime as Trait>::ReplyId,
-) -> Option<Reply<Runtime>> {
-    match TestBlogModule::reply_by_id((blog_id, post_id), reply_id) {
-        reply if reply != Reply::<Runtime>::default() => Some(reply),
+) -> Option<Reply<Runtime, DefaultInstance>> {
+    match TestBlogModule::reply_by_id(post_id, reply_id) {
+        reply if reply != Reply::<Runtime, DefaultInstance>::default() => Some(reply),
         _ => None,
     }
 }
@@ -358,33 +321,31 @@ pub fn get_reply_text(reply_type: ReplyType, editing: bool) -> Vec<u8> {
 pub fn get_reply(
     reply_type: ReplyType,
     owner: <Runtime as system::Trait>::AccountId,
-    parent_id: ParentId<Runtime>,	
+    parent_id: ParentId<Runtime, DefaultInstance>,
     editing: bool,
-) -> Reply<Runtime> {
+) -> Reply<Runtime, DefaultInstance> {
     let reply_text = get_reply_text(reply_type, editing);
     Reply::new(reply_text, owner, parent_id)
 }
 
 pub fn create_reply(
     origin_id: u64,
-    blog_id: <Runtime as Trait>::BlogId,
     post_id: <Runtime as Trait>::PostId,
     reply_id: Option<<Runtime as Trait>::ReplyId>,
     reply_type: ReplyType,
 ) -> Result<(), &'static str> {
     let reply = get_reply_text(reply_type, false);
-    TestBlogModule::create_reply(Origin::signed(origin_id), blog_id, post_id, reply_id, reply)
+    TestBlogModule::create_reply(Origin::signed(origin_id), post_id, reply_id, reply)
 }
 
 pub fn edit_reply(
     origin_id: u64,
-    blog_id: <Runtime as Trait>::BlogId,
     post_id: <Runtime as Trait>::PostId,
     reply_id: <Runtime as Trait>::ReplyId,
     reply_type: ReplyType,
 ) -> Result<(), &'static str> {
     let reply = get_reply_text(reply_type, true);
-    TestBlogModule::edit_reply(Origin::signed(origin_id), blog_id, post_id, reply_id, reply)
+    TestBlogModule::edit_reply(Origin::signed(origin_id), post_id, reply_id, reply)
 }
 
 // Reactions
@@ -392,22 +353,20 @@ pub fn edit_reply(
 pub fn react(
     origin_id: u64,
     index: ReactionsNumber,
-    blog_id: <Runtime as Trait>::BlogId,
     post_id: <Runtime as Trait>::PostId,
     reply_id: Option<<Runtime as Trait>::ReplyId>,
 ) -> Result<(), &'static str> {
-    TestBlogModule::react(Origin::signed(origin_id), index, blog_id, post_id, reply_id)
+    TestBlogModule::react(Origin::signed(origin_id), index, post_id, reply_id)
 }
 
 pub fn get_reactions(
-    blog_id: <Runtime as Trait>::BlogId,
     post_id: <Runtime as Trait>::PostId,
     reply_id: Option<<Runtime as Trait>::ReplyId>,
     owner: <Runtime as Trait>::ParticipantId,
 ) -> Option<[bool; REACTIONS_MAX_NUMBER as usize]> {
-    if Reactions::<Runtime>::exists((blog_id, post_id, reply_id), owner) {
-       Some(TestBlogModule::reactions((blog_id, post_id, reply_id), owner))
+    if Reactions::<Runtime>::exists((post_id, reply_id), owner) {
+        Some(TestBlogModule::reactions((post_id, reply_id), owner))
     } else {
-       None
+        None
     }
 }

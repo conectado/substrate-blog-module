@@ -1,6 +1,4 @@
-pub const BLOG_NOT_FOUND: &str = "Blog, associated with given blog id does not found";
 pub const BLOG_OWNERSHIP_ERROR: &str = "You don`t own blog, associated with this identifier";
-pub const BLOG_LOCKED_ERROR: &str = "Please, unlock your blog before any new actions";
 pub const POST_NOT_FOUND: &str = "Post, associated with given blog and post ids does not found";
 pub const POST_LOCKED_ERROR: &str = "Please, unlock post before this action!";
 pub const REPLY_NOT_FOUND: &str =
